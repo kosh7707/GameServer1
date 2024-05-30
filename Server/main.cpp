@@ -19,6 +19,11 @@ struct OverlappedEx {
     DWORD operation;
 };
 
+struct ClientInfo {
+    int count;
+    SOCKET clientSocket;
+};
+
 enum Operation {
     OP_ACCEPT = 1,
     OP_READ,
@@ -35,9 +40,9 @@ void WorkerThread() {
     OverlappedEx* overlappedEx;
 
     while (running) {
-        BOOL success = GetQueuedCompletionStatus(
-            completionPort, &bytesTransferred, &completionKey,
-            reinterpret_cast<LPOVERLAPPED*>(&overlappedEx), INFINITE);
+        // completionKey --> createIoCompletionPort를 할 당시 넣어준 completionKey의 값을 던져줌.
+        // 즉, 저기에 넣는건 뭐든 상관없지만, 해당 소켓을 나타낼 지표가 되어주는게 좋음.
+        BOOL success = GetQueuedCompletionStatus(completionPort, &bytesTransferred, &completionKey, reinterpret_cast<LPOVERLAPPED*>(&overlappedEx), INFINITE);
 
         if (!success) {
             if (overlappedEx == nullptr) {
@@ -50,6 +55,10 @@ void WorkerThread() {
         }
 
         SOCKET clientSocket = overlappedEx->socket;
+
+        ClientInfo* clientInfo = reinterpret_cast<ClientInfo*>(completionKey);
+        std::cout << "client count: " << clientInfo->count << "\n";
+        std::cout << "client socket: " << clientInfo->clientSocket << "\n";
 
         switch (overlappedEx->operation) {
         case OP_READ: {
@@ -93,6 +102,8 @@ void InitializeWorkerThreads() {
 
 void AcceptConnections(SOCKET listenSocket) {
     while (running) {
+        static int count = 1;
+        ClientInfo* clientInfo = new ClientInfo();
         SOCKET clientSocket = accept(listenSocket, nullptr, nullptr);
         if (clientSocket == INVALID_SOCKET) {
             std::cerr << "accept failed with error: " << WSAGetLastError() << std::endl;
@@ -100,6 +111,8 @@ void AcceptConnections(SOCKET listenSocket) {
         }
 
         std::cout << "New client connected" << std::endl;
+        clientInfo->count = count++;
+        clientInfo->clientSocket = clientSocket;
 
         OverlappedEx* overlappedEx = new OverlappedEx;
         memset(&overlappedEx->overlapped, 0, sizeof(OVERLAPPED));
@@ -110,7 +123,7 @@ void AcceptConnections(SOCKET listenSocket) {
         overlappedEx->operation = OP_READ;
 
         // 소켓을 IOCP에 연결
-        CreateIoCompletionPort(reinterpret_cast<HANDLE>(clientSocket), completionPort, static_cast<ULONG_PTR>(clientSocket), 0);
+        CreateIoCompletionPort(reinterpret_cast<HANDLE>(clientSocket), completionPort, reinterpret_cast<ULONG_PTR>(clientInfo), 0);
 
         DWORD flags = 0;
         DWORD recvBytes;
