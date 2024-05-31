@@ -30,6 +30,7 @@ enum Operation {
     OP_WRITE
 };
 
+
 std::atomic<bool> running(true);
 HANDLE completionPort = nullptr;
 std::vector<std::thread> workerThreads;
@@ -43,7 +44,6 @@ void WorkerThread() {
         // completionKey --> createIoCompletionPort를 할 당시 넣어준 completionKey의 값을 던져줌.
         // 즉, 저기에 넣는건 뭐든 상관없지만, 해당 소켓을 나타낼 지표가 되어주는게 좋음.
         BOOL success = GetQueuedCompletionStatus(completionPort, &bytesTransferred, &completionKey, reinterpret_cast<LPOVERLAPPED*>(&overlappedEx), INFINITE);
-
         if (!success) {
             if (overlappedEx == nullptr) {
                 break;
@@ -135,6 +135,20 @@ void AcceptConnections(SOCKET listenSocket) {
         }
     }
 }
+
+/*
+동작 과정 정리
+1. SOCKET bind, listen
+2. CreateIoCompletionPort로 IOCP 생성 --> 마치 거대한 Queue가 있는 느낌, 여기에 비동기 I/O의 완료 정보가 담김
+3. Server Socket이 accept를 시작.
+4. 클라이언트가 연결을 시도하면, AcceptConnections 함수 시작, 클라이언트 소켓 정보와 함께 생성되어 있는 IOCP에 연결 시도.
+5. 클라이언트가 send를 하였을 경우, 비동기 함수인 WSARecv가 처리되기 시작, 처리가 완료되면 IOCP에 enqueue됨.
+6. GetQueuedCompletionStatus에서 완료된 WSARecv 정보를 얻음.
+7. 클라이언트가 send한 정보를 빼서 처리함.
+8. 서버가 WSASend로 Client에 send함.
+9. GetQueuedCompletionStatus에 완료된 WSASend 정보를 얻고, 다시 WSARecv를 하며 기다림.
+10. 5 ~ 9 반복
+*/
 
 int main() {
     WSADATA wsaData;
